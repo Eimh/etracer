@@ -2,11 +2,35 @@ use std::future::Future;
 use std::sync::mpsc::{channel, Receiver, Sender};
 
 use egui::{
-    Color32, ColorImage, Frame, Pos2, Rect, Sense, TextureHandle, TextureId, TextureOptions, Vec2,
+    Color32, ColorImage, Frame, Pos2, Rect, Rounding, Sense, TextureHandle, TextureId,
+    TextureOptions, Vec2,
 };
 use image::DynamicImage;
 //use pdf_writer::Pdf;
+#[derive(Debug, PartialEq, Copy, Clone)]
+enum Units {
+    Inches,
+    Centimeters,
+}
 
+#[derive(Debug, PartialEq, Copy, Clone)]
+enum Page {
+    Letter,
+    A4,
+    Legal,
+    Tabloid,
+}
+
+impl Page {
+    fn size(&self) -> Vec2 {
+        match self {
+            Page::A4 => Vec2::new(8.3, 11.7),
+            Page::Legal => Vec2::new(8.5, 14.0),
+            Page::Letter => Vec2::new(8.5, 11.0),
+            Page::Tabloid => Vec2::new(11.0, 17.0),
+        }
+    }
+}
 /// We derive Deserialize/Serialize so we can persist app state on shutdown.
 //#[derive(serde::Deserialize, serde::Serialize)]
 //#[serde(default)] // if we add new fields, give them default values when deserializing old state
@@ -21,9 +45,9 @@ pub struct EtracerApp {
     //#[serde(skip)] // This how you opt-out of serialization of a field
     desired_width: f32,
     desired_height: f32,
+    units: Units,
+    page_size: Page,
     maintain_aspect_ratio: bool,
-    page_width: f32,
-    page_height: f32,
 }
 
 impl Default for EtracerApp {
@@ -37,10 +61,10 @@ impl Default for EtracerApp {
             desired_width: 8.26,
             desired_height: 15.0,
             maintain_aspect_ratio: false,
-            page_width: 8.5,
-            page_height: 11.0,
             texture_handle: None,
             texture_id: None,
+            units: Units::Inches,
+            page_size: Page::Letter,
         }
     }
 }
@@ -95,6 +119,14 @@ impl eframe::App for EtracerApp {
         }
 
         egui::SidePanel::left("left").show(ctx, |ui| {
+            //4, 13, 18
+            //24, 61, 61
+            //92, 131, 116
+            //147, 177, 166
+            // ui.style_mut().visuals.extreme_bg_color = Color32::from_rgb(4, 13, 18);
+            // ui.style_mut().visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(24, 61, 61);
+            // ui.style_mut().visuals.widgets.inactive.bg_fill = Color32::from_rgb(92, 131, 116);
+            // ui.style_mut().visuals.widgets.inactive.rounding = Rounding::same(10.0);
             let btn_load = ui.button("load");
 
             if btn_load.clicked() {
@@ -129,36 +161,110 @@ impl eframe::App for EtracerApp {
             ui.add(
                 egui::Slider::from_get_set(0.1..=100.0, |v| match v {
                     Some(val) => {
-                        self.desired_width = val as f32;
+                        self.desired_width = match self.units {
+                            Units::Inches => val as f32,
+                            Units::Centimeters => val as f32 / 2.54,
+                        };
                         if self.maintain_aspect_ratio && self.image_data.is_some() {
-                            self.desired_height = (val
+                            self.desired_height = (self.desired_width as f64
                                 * self.image_data.as_ref().unwrap().height() as f64
                                 / self.image_data.as_ref().unwrap().width() as f64)
                                 as f32;
                         }
                         val
                     }
-                    None => self.desired_width as f64,
+                    None => match self.units {
+                        Units::Inches => self.desired_width as f64,
+                        Units::Centimeters => self.desired_width as f64 * 2.54,
+                    },
                 })
                 .text("Desired width"),
             );
             ui.add(
                 egui::Slider::from_get_set(0.1..=100.0, |v| match v {
                     Some(val) => {
-                        self.desired_height = val as f32;
+                        self.desired_height = match self.units {
+                            Units::Inches => val as f32,
+                            Units::Centimeters => val as f32 / 2.54,
+                        };
                         if self.maintain_aspect_ratio && self.image_data.is_some() {
-                            self.desired_width = (val
+                            self.desired_width = (self.desired_height as f64
                                 * self.image_data.as_ref().unwrap().width() as f64
                                 / self.image_data.as_ref().unwrap().height() as f64)
                                 as f32;
                         }
                         val
                     }
-                    None => self.desired_height as f64,
+                    None => match self.units {
+                        Units::Inches => self.desired_height as f64,
+                        Units::Centimeters => self.desired_height as f64 * 2.54,
+                    },
                 })
                 .text("Desired height"),
             );
 
+            egui::ComboBox::from_label("Units")
+                .selected_text(format!("{:?}", self.units))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.units,
+                        Units::Inches,
+                        format!("{:?}", Units::Inches),
+                    );
+                    ui.selectable_value(
+                        &mut self.units,
+                        Units::Centimeters,
+                        format!("{:?}", Units::Centimeters),
+                    );
+                });
+            let multiplier = match self.units {
+                Units::Inches => 1.0,
+                Units::Centimeters => 2.54,
+            };
+            egui::ComboBox::from_label("Page")
+                .selected_text(format!("{:?}", self.page_size))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.page_size,
+                        Page::Letter,
+                        format!(
+                            "{:?} ({:.2}x{:.2})",
+                            Page::Letter,
+                            Page::Letter.size().x * multiplier,
+                            Page::Letter.size().y * multiplier
+                        ),
+                    );
+                    ui.selectable_value(
+                        &mut self.page_size,
+                        Page::A4,
+                        format!(
+                            "{:?} ({:.2}x{:.2})",
+                            Page::A4,
+                            Page::A4.size().x * multiplier,
+                            Page::A4.size().y * multiplier
+                        ),
+                    );
+                    ui.selectable_value(
+                        &mut self.page_size,
+                        Page::Legal,
+                        format!(
+                            "{:?} ({:.2}x{:.2})",
+                            Page::Legal,
+                            Page::Legal.size().x * multiplier,
+                            Page::Legal.size().y * multiplier
+                        ),
+                    );
+                    ui.selectable_value(
+                        &mut self.page_size,
+                        Page::Tabloid,
+                        format!(
+                            "{:?} ({:.2}x{:.2})",
+                            Page::Tabloid,
+                            Page::Tabloid.size().x * multiplier,
+                            Page::Tabloid.size().y * multiplier
+                        ),
+                    );
+                });
             ui.separator();
 
             if ui.button("save").clicked() {
@@ -166,12 +272,11 @@ impl eframe::App for EtracerApp {
                 let d = self.raw_data.as_ref().unwrap().clone();
                 let dh = self.desired_height;
                 let dw = self.desired_width;
-                let ph = self.page_height;
-                let pw = self.page_width;
+                let p = self.page_size;
                 execute(async move {
                     let q = z.await;
                     if let Some(file) = q {
-                        let res = file.write(&generate_pdf(dw, dh, pw, ph, &d)).await;
+                        let res = file.write(&generate_pdf(dw, dh, p, &d)).await;
                     }
                 });
             }
@@ -210,28 +315,34 @@ impl eframe::App for EtracerApp {
                     ui.allocate_painter(ui.available_size_before_wrap(), Sense::hover());
 
                 let page_count_horizontal =
-                    calculate_page_count(self.desired_width, self.page_width);
+                    calculate_page_count(self.desired_width, self.page_size.size().x);
                 let page_count_vertical =
-                    calculate_page_count(self.desired_height, self.page_height);
+                    calculate_page_count(self.desired_height, self.page_size.size().y);
                 let margin_frac = 0.05;
                 let mut display_page_height = draw_area.height()
                     / (page_count_vertical as f32 * (1.0 + margin_frac) - margin_frac);
                 let mut display_page_width = draw_area.width()
                     / (page_count_horizontal as f32 * (1.0 + margin_frac) - margin_frac);
-                if display_page_width >= display_page_height * self.page_width / self.page_height {
-                    display_page_width = display_page_height * self.page_width / self.page_height;
+                if display_page_width
+                    >= display_page_height * self.page_size.size().x / self.page_size.size().y
+                {
+                    display_page_width =
+                        display_page_height * self.page_size.size().x / self.page_size.size().y;
                 } else {
-                    display_page_height = display_page_width * self.page_height / self.page_width;
+                    display_page_height =
+                        display_page_width * self.page_size.size().y / self.page_size.size().x;
                 }
 
-                let offset_vertical =
-                    ((page_count_vertical as f32 * self.page_height - self.desired_height) / 2.0)
-                        / self.page_height
-                        * display_page_height;
-                let offset_horizontal =
-                    ((page_count_horizontal as f32 * self.page_width - self.desired_width) / 2.0)
-                        / self.page_width
-                        * display_page_width;
+                let offset_vertical = ((page_count_vertical as f32 * self.page_size.size().y
+                    - self.desired_height)
+                    / 2.0)
+                    / self.page_size.size().y
+                    * display_page_height;
+                let offset_horizontal = ((page_count_horizontal as f32 * self.page_size.size().x
+                    - self.desired_width)
+                    / 2.0)
+                    / self.page_size.size().x
+                    * display_page_width;
 
                 for y in 0..page_count_vertical {
                     for x in 0..page_count_horizontal {
@@ -268,7 +379,7 @@ impl eframe::App for EtracerApp {
                         }
                         let page_count =
                             Vec2::new(page_count_horizontal as f32, page_count_vertical as f32);
-                        let page_size = Vec2::new(self.page_width, self.page_height);
+                        let page_size = Vec2::new(self.page_size.size().x, self.page_size.size().y);
                         let desired_size = Vec2::new(self.desired_width, self.desired_height);
                         let prev_uv = calculate_uv_offset(
                             Vec2::new(x as f32, y as f32),
@@ -342,8 +453,8 @@ fn calculate_page_count(desired: f32, print: f32) -> i32 {
     (desired / print).ceil() as i32
 }
 
-fn calculate_image_scale(desired: f32, print: f32, pdf_page: i32) -> f32 {
-    (desired / print) * pdf_page as f32
+fn calculate_image_scale(desired: f32, print: f32, pdf_page: f32) -> f32 {
+    (desired / print) * pdf_page
 }
 
 fn calculate_uv_offset(page: Vec2, page_count: Vec2, page_size: Vec2, desired_size: Vec2) -> Vec2 {
@@ -355,12 +466,14 @@ fn calculate_uv_offset(page: Vec2, page_count: Vec2, page_size: Vec2, desired_si
 fn generate_pdf(
     desired_width: f32,
     desired_height: f32,
-    page_width: f32,
-    page_height: f32,
+    page_size: Page,
     image_data: &[u8],
 ) -> Vec<u8> {
-    let pdf_point_page_width = 595;
-    let pdf_point_page_height = 842;
+    let page_width = page_size.size().x;
+    let page_height = page_size.size().y;
+    let dpi = 72.0;
+    let pdf_point_page_width = page_width * dpi; //595;
+    let pdf_point_page_height = page_height * dpi; //842;
 
     let page_count_horizontal = calculate_page_count(desired_width, page_width);
     let page_count_vertical = calculate_page_count(desired_height, page_height);
@@ -374,13 +487,13 @@ fn generate_pdf(
 
     for y in 0..page_count_vertical {
         let y_offset =
-            (((page_count_vertical * pdf_point_page_height) as f32 - desired_image_height) / 2.0)
-                - (y * pdf_point_page_height) as f32;
+            (((page_count_vertical as f32 * pdf_point_page_height) - desired_image_height) / 2.0)
+                - (y as f32 * pdf_point_page_height);
         for x in 0..page_count_horizontal {
-            let x_offset = (((page_count_horizontal * pdf_point_page_width) as f32
+            let x_offset = (((page_count_horizontal as f32 * pdf_point_page_width)
                 - desired_image_width)
                 / 2.0)
-                - (x * pdf_point_page_width) as f32;
+                - (x as f32 * pdf_point_page_width);
             let mut page = doc.start_page();
             let mut surface = page.surface();
             surface.push_transform(&krilla::geom::Transform::from_translate(x_offset, y_offset));
