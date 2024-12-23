@@ -1,6 +1,5 @@
 use std::future::Future;
 use std::sync::mpsc::{channel, Receiver, Sender};
-
 use egui::{
     Color32, ColorImage, Frame, Pos2, Rect, Rounding, Sense, TextureHandle, TextureId,
     TextureOptions, Vec2,
@@ -463,12 +462,34 @@ fn calculate_uv_offset(page: Vec2, page_count: Vec2, page_size: Vec2, desired_si
     uv.clamp(Vec2::ZERO, Vec2::new(1.0, 1.0))
 }
 
+#[derive(Debug)]
+pub struct ParseImageError;
+
+impl std::error::Error for ParseImageError {}
+
+impl std::fmt::Display for ParseImageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Failed to parse image. Must be [png, jpeg].")
+    }
+}
+
+fn parse_krilla_image(data: &[u8]) -> Result<krilla::image::Image, ParseImageError> {
+    if let Some(png) = krilla::image::Image::from_png(data) {
+        return Ok(png);
+    } 
+    if let Some(jpeg) = krilla::image::Image::from_jpeg(data) {
+        return Ok(jpeg);
+    } 
+    return Err(ParseImageError);
+}
+
 fn generate_pdf(
     desired_width: f32,
     desired_height: f32,
     page_size: Page,
     image_data: &[u8],
 ) -> Vec<u8> {
+    let krilla_image = parse_krilla_image(image_data).expect("Only png and jpeg should be supported.");
     let page_width = page_size.size().x;
     let page_height = page_size.size().y;
     let dpi = 72.0;
@@ -484,7 +505,6 @@ fn generate_pdf(
         calculate_image_scale(desired_height, page_height, pdf_point_page_height);
 
     let mut doc = krilla::Document::new();
-
     for y in 0..page_count_vertical {
         let y_offset =
             (((page_count_vertical as f32 * pdf_point_page_height) - desired_image_height) / 2.0)
@@ -498,7 +518,7 @@ fn generate_pdf(
             let mut surface = page.surface();
             surface.push_transform(&krilla::geom::Transform::from_translate(x_offset, y_offset));
             surface.draw_image(
-                krilla::image::Image::from_png(&image_data).unwrap(),
+                krilla_image.clone(),
                 krilla::geom::Size::from_wh(desired_image_width, desired_image_height).unwrap(),
             );
             surface.pop();
