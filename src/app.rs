@@ -267,7 +267,7 @@ impl eframe::App for EtracerApp {
             ui.separator();
 
             if ui.button("save").clicked() {
-                let z = rfd::AsyncFileDialog::new().set_title("agh.pdf").save_file();
+                let z = rfd::AsyncFileDialog::new().set_title("Save resized.pdf").set_file_name("resized.pdf").save_file();
                 let d = self.raw_data.as_ref().unwrap().clone();
                 let dh = self.desired_height;
                 let dw = self.desired_width;
