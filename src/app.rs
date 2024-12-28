@@ -5,6 +5,7 @@ use egui::{
     TextureOptions, Vec2,
 };
 use image::DynamicImage;
+use krilla::PageSettings;
 //use pdf_writer::Pdf;
 #[derive(Debug, PartialEq, Copy, Clone)]
 enum Units {
@@ -514,7 +515,7 @@ fn generate_pdf(
                 - desired_image_width)
                 / 2.0)
                 - (x as f32 * pdf_point_page_width);
-            let mut page = doc.start_page();
+            let mut page = doc.start_page_with(PageSettings::new(pdf_point_page_width, pdf_point_page_height));
             let mut surface = page.surface();
             surface.push_transform(&krilla::geom::Transform::from_translate(x_offset, y_offset));
             surface.draw_image(
